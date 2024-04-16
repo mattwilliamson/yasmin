@@ -95,17 +95,17 @@ public:
   }
 
   void cancel_state() {
-    // this->action_client->cancel_goal();
-    yasmin::State::cancel_state();
+    std::lock_guard<std::mutex> lock(this->goal_handle_mutex);
+    if (this->goal_handle) {
+      this->action_client->async_cancel_goal(
+          this->goal_handle, std::bind(&ActionState::cancel_state, this));
+    }
   }
 
   std::string
   execute(std::shared_ptr<yasmin::blackboard::Blackboard> blackboard) {
 
-    std::unique_lock<std::mutex> lock(this->action_done_mutex);
-
     Goal goal = this->create_goal_handler(blackboard);
-
     this->action_client->wait_for_action_server();
 
     // options
@@ -119,6 +119,7 @@ public:
     this->action_client->async_send_goal(goal, send_goal_options);
 
     // wait for results
+    std::unique_lock<std::mutex> lock(this->action_done_mutex);
     this->action_done_cond.wait(lock);
 
     if (this->action_status == rclcpp_action::ResultCode::CANCELED) {
@@ -165,6 +166,9 @@ private:
     this->action_result = result.result;
     this->action_status = result.code;
     this->action_done_cond.notify_one();
+
+    std::lock_guard<std::mutex> lock(this->goal_handle_mutex);
+    this->goal_handle = nullptr;
   }
 };
 
